@@ -22,7 +22,8 @@ model_chars = ['!', '"', '#', '$', '%', '&', "'", '(', ')', '*', '+', ',', '-', 
                'x', 'y', 'z']
 
 # Create and train chars2vec model using given training data
-my_c2v_model = chars2vec.train_model(dim, X_train, y_train, model_chars)
+# Keras bug with batch_size, smaller than predefined default, see https://github.com/keras-team/keras/issues/3657
+my_c2v_model = chars2vec.train_model(dim, X_train, y_train, model_chars, batch_size=min(len(X_train), 64))
 
 # Save pretrained model
 chars2vec.save_model(my_c2v_model, path_to_model)
