@@ -1,7 +1,73 @@
 import numpy as np
 import pickle
-import keras
 import os
+import keras
+
+
+class WordPairsGenerator(keras.utils.Sequence):
+
+    def __init__(self, word_pairs, targets, batch_size, char_to_ix):
+        """
+        Create generator to process larger datasets
+        :param word_pairs: list or numpy.ndarray of word pairs.
+        :param targets: list or numpy.ndarray of targets.
+        :param batch_size: parameter 'batch_size' of keras model.
+        """
+        if not isinstance(word_pairs, list) and not isinstance(word_pairs, np.ndarray):
+            raise TypeError("parameters 'word_pairs' must be a list or numpy.ndarray")
+
+        if not isinstance(targets, list) and not isinstance(targets, np.ndarray):
+            raise TypeError("parameters 'targets' must be a list or numpy.ndarray")
+
+        self.word_pairs = word_pairs
+        self.targets = targets
+        self.batch_size = batch_size
+        self.indexes = range(len(word_pairs))
+        self.char_to_ix = char_to_ix
+        self.ix_to_char = {char_to_ix[ch]: ch for ch in char_to_ix}
+        self.vocab_size = len(self.char_to_ix)
+
+    def __len__(self):
+        return int(np.floor(len(self.indexes) / self.batch_size))
+
+    def __getitem__(self, index):
+        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+        word_pairs = [self.word_pairs[i] for i in indexes]
+        x_1, x_2 = [], []
+        for pair_words in word_pairs:
+            emb_list_1 = []
+            emb_list_2 = []
+
+            if not isinstance(pair_words[0], str) or not isinstance(pair_words[1], str):
+                raise TypeError("word must be a string")
+
+            first_word = pair_words[0].lower()
+            second_word = pair_words[1].lower()
+
+            for t in range(len(first_word)):
+
+                if first_word[t] in self.char_to_ix:
+                    x = np.zeros(self.vocab_size)
+                    x[self.char_to_ix[first_word[t]]] = 1
+                    emb_list_1.append(x)
+
+                else:
+                    emb_list_1.append(np.zeros(self.vocab_size))
+
+            x_1.append(np.array(emb_list_1))
+
+            for t in range(len(second_word)):
+                if second_word[t] in self.char_to_ix:
+                    x = np.zeros(self.vocab_size)
+                    x[self.char_to_ix[second_word[t]]] = 1
+                    emb_list_2.append(x)
+                else:
+                    emb_list_2.append(np.zeros(self.vocab_size))
+            x_2.append(np.array(emb_list_2))
+
+        return [keras.preprocessing.sequence.pad_sequences(x_1),
+                keras.preprocessing.sequence.pad_sequences(x_2)], \
+               [self.targets[i] for i in indexes]
 
 
 class Chars2Vec:
@@ -46,68 +112,20 @@ class Chars2Vec:
         self.model.compile(optimizer='adam', loss='mae')
 
 
-    def fit(self, word_pairs, targets,
-            max_epochs, patience, validation_split, batch_size):
-        '''
-        Fits model.
+    def fit(self, word_pairs, targets, max_epochs, patience, batch_size):
+        # '''
+        # Fits model.
+        #
+        # :param word_pairs: list or numpy.ndarray of word pairs.
+        # :param targets: list or numpy.ndarray of targets.
+        # :param max_epochs: parameter 'epochs' of keras model.
+        # :param patience: parameter 'patience' of callback in keras model.
+        # :param batch_size: parameter 'batch_size' of keras model.
+        # '''
+        self.model.fit_generator(WordPairsGenerator(word_pairs, targets, batch_size, self.char_to_ix),
+                                 epochs=max_epochs,
+                                 callbacks=[keras.callbacks.EarlyStopping(monitor='val_loss', patience=patience)])
 
-        :param word_pairs: list or numpy.ndarray of word pairs.
-        :param targets: list or numpy.ndarray of targets.
-        :param max_epochs: parameter 'epochs' of keras model.
-        :param patience: parameter 'patience' of callback in keras model.
-        :param validation_split: parameter 'validation_split' of keras model.
-        :param batch_size: parameter 'batch_size' of keras model.
-        '''
-
-        if not isinstance(word_pairs, list) and not isinstance(word_pairs, np.ndarray):
-            raise TypeError("parameters 'word_pairs' must be a list or numpy.ndarray")
-
-        if not isinstance(targets, list) and not isinstance(targets, np.ndarray):
-            raise TypeError("parameters 'targets' must be a list or numpy.ndarray")
-
-        x_1, x_2 = [], []
-
-        for pair_words in word_pairs:
-            emb_list_1 = []
-            emb_list_2 = []
-
-            if not isinstance(pair_words[0], str) or not isinstance(pair_words[1], str):
-                raise TypeError("word must be a string")
-
-            first_word = pair_words[0].lower()
-            second_word = pair_words[1].lower()
-
-            for t in range(len(first_word)):
-
-                if first_word[t] in self.char_to_ix:
-                    x = np.zeros(self.vocab_size)
-                    x[self.char_to_ix[first_word[t]]] = 1
-                    emb_list_1.append(x)
-
-                else:
-                    emb_list_1.append(np.zeros(self.vocab_size))
-
-            x_1.append(np.array(emb_list_1))
-
-            for t in range(len(second_word)):
-
-                if second_word[t] in self.char_to_ix:
-                    x = np.zeros(self.vocab_size)
-                    x[self.char_to_ix[second_word[t]]] = 1
-                    emb_list_2.append(x)
-
-                else:
-                    emb_list_2.append(np.zeros(self.vocab_size))
-
-            x_2.append(np.array(emb_list_2))
-
-        x_1_pad_seq = keras.preprocessing.sequence.pad_sequences(x_1)
-        x_2_pad_seq = keras.preprocessing.sequence.pad_sequences(x_2)
-
-        self.model.fit([x_1_pad_seq, x_2_pad_seq], targets,
-                       batch_size=batch_size, epochs=max_epochs,
-                       validation_split=validation_split,
-                       callbacks=[keras.callbacks.EarlyStopping(monitor='val_loss', patience=patience)])
 
     def vectorize_words(self, words, maxlen_padseq=None):
         '''
@@ -204,8 +222,7 @@ def load_model(path):
     return c2v_model
 
 
-def train_model(emb_dim, X_train, y_train, model_chars,
-                max_epochs=200, patience=10, validation_split=0.05, batch_size=64):
+def train_model(emb_dim, X_train, y_train, model_chars, max_epochs=200, patience=10, batch_size=64):
     '''
     Creates and trains chars2vec model using given training data.
 
@@ -215,7 +232,6 @@ def train_model(emb_dim, X_train, y_train, model_chars,
     :param model_chars: list or numpy.ndarray of basic chars in model.
     :param max_epochs: parameter 'epochs' of keras model.
     :param patience: parameter 'patience' of callback in keras model.
-    :param validation_split: parameter 'validation_split' of keras model.
     :param batch_size: parameter 'batch_size' of keras model.
 
     :return c2v_model: Chars2Vec object, trained model.
@@ -234,6 +250,6 @@ def train_model(emb_dim, X_train, y_train, model_chars,
     c2v_model = Chars2Vec(emb_dim, char_to_ix)
 
     targets = [float(el) for el in y_train]
-    c2v_model.fit(X_train, targets, max_epochs, patience, validation_split, batch_size)
+    c2v_model.fit(X_train, targets, max_epochs, patience, batch_size)
 
     return c2v_model
